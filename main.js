@@ -1,5 +1,4 @@
-var boundary = 1000 * 1000 * 5; //MB
-var chunkSize = 1000 * 1000; //1 MB
+
 var searchButton = document.querySelector('#searchbutton');
 var cursorPositionLabel = document.querySelector('#cursor_position');
 var resultCountLabel = document.querySelector('#result_count');
@@ -8,9 +7,21 @@ var readTo = document.querySelector("#read-to");
 var filePicker = document.querySelector("#files");
 var progressBar = document.querySelector("#progress-bar");
 var fileSize;
-var capturingMultiLineLogMatcher = /\[([^\]]*)\]\s\[([^\]]*)\]\s\[([^\]]*)\]\s\[([^\]]*)\]\s([A-Z]+)\s+\|([^\|]*)\|((?:(?!\n\[20)[\S|\s])*)/;
-var capturingSingleLineLogMatcher = /\[([^\]]*)\]\s\[([^\]]*)\]\s\[([^\]]*)\]\s\[([^\]]*)\]\s([A-Z]+)\s+\|([^\|]*)\|\s(.*)/;
 var fileReadEndTime;
+
+var workerCount = 4;
+var workers = [];
+for(var i = 0; i < workerCount; i++) {
+	var worker = {
+		worker: new Worker("chunk_task.js"),
+		busy: false
+	};
+	workers.push(worker);
+	worker.worker.postMessage({
+		action: 'init',
+		workerIndex: i
+	});
+}
 
 var setSliderLabels = function setSliderValues() {
 	document.querySelector('#read-from-label').textContent = bytesToSize(readFrom.value);
@@ -29,8 +40,8 @@ filePicker.addEventListener('change', function() {
 
 	var defaultValue = Math.min(fileSize, 1024*1024*300);
 
-	readFrom.value = fileSize - 1024 * 1024 * 200;
-	readTo.value = fileSize;
+	readFrom.value = 0;
+	readTo.value = defaultValue;
 
 	setSliderLabels();
 });
@@ -44,126 +55,6 @@ function getFileSize() {
 	}
 }
 
-function readBlob(opt_startByte, opt_stopByte) {
-	var deferred = Q.defer();
-
-	var files = document.getElementById('files').files;
-	if (!files.length) {
-		alert('Please select a file!');
-		return;
-	}
-
-	var file = files[0];
-	var start = parseInt(opt_startByte, 10) || 0;
-	var stop = parseInt(opt_stopByte, 10) || start + 1000;
-
-	//Restrict stop marker to EOF
-	if(stop > file.size - 1) {
-		console.warn('Stop marker outside file length. Setting to file length.');
-		stop = file.size - 1;
-	}
-
-	var reader = new FileReader();
-
-	reader.onloadend = function(e) {
-		if (e.target.readyState == FileReader.DONE) { // DONE == 2
-			deferred.resolve(e.target.result);
-		}
-	};
-
-	var blob = file.slice(start, stop + 1);
-	reader.readAsBinaryString(blob);
-
-	return deferred.promise;
-}
-
-/**
- * Get all lines inside of start and stop, and all complete all lines that are bordering before and after.
- * @param startIndex
- * @param stopIndex
- * @returns promise
- */
-function getLogLines(startIndex, stopIndex) {
-	var allContent;
-
-	var deferred = Q.defer();
-
-	readBlob(startIndex, stopIndex)
-		.then(function (data) {
-			allContent = data;
-		})
-		.then(function() {
-			return findContentBeforeLineBreak(startIndex - 1, false)
-		})
-		.then(function (data) {
-			allContent = data + allContent;
-		})
-		.then(function() {
-			return findContentBeforeLineBreak(stopIndex + 1, true)
-		})
-		.then(function (data) {
-			allContent = allContent + data;
-			fileReadEndTime = new Date();
-			deferred.resolve(allContent.split('\n[20'));
-		})
-		.fail(function (e) {
-			deferred.reject(e);
-		});
-
-	return deferred.promise;
-
-}
-
-/**
- * Finds all content from index to the nearest line break.
- * @param index
- * @param forward True to search forward in file, false to search backwards from index
- * @returns promise
- */
-function findContentBeforeLineBreak(index, forward) {
-	var direction = forward ? 1 : -1;
-	var index2 = index + 1024 * 512 * direction; //500KB should be plenty to find the end of a log entry...?
-	var deferred = Q.defer();
-
-	var start = Math.min(index, index2);
-	var stopIndex = Math.max(index, index2);
-
-	start = Math.max(start, 0);
-	stopIndex = Math.min(stopIndex, fileSize - 1);
-
-	readBlob(start, stopIndex).then(function (data) {
-		var pos, fragment;
-		if (forward) {
-			pos = data.indexOf('\n[20');
-		} else {
-			pos = data.lastIndexOf('\n[20');
-		}
-
-		if (pos == -1) {
-			if(start === 0) {
-				//Return everything before index because we are at the beginning of the file.
-				deferred.resolve(data);
-			} else if(stopIndex === fileSize - 1) {
-				//Return everything because we are at the end of the file
-				deferred.resolve(data);
-			} else {
-				console.error('Could not find a line break');
-				deferred.reject();
-			}
-		} else {
-			if (forward) {
-				fragment = data.substr(0, pos - 1);
-			} else {
-				fragment = data.substr(pos + 1);
-			}
-
-			deferred.resolve(fragment);
-		}
-	});
-
-	return deferred.promise;
-}
-
 var Search = function(startIndex, limitIndex, forward) {
 	var position = startIndex;
 	var deferred = Q.defer();
@@ -173,112 +64,94 @@ var Search = function(startIndex, limitIndex, forward) {
 	var searchStartedAt = new Date();
 	var sizeOfMatchedData = 0;
 	var resultCount = 0;
-	var stringResults = '';
-	var matchesDictionary = [];
+	var matches = [];
 	var keys = [];
 	var lineCount = 0;
 	var bytesProcessed = 0;
 	var timeSpentParsing = 0;
 
-	var readNext = function() {
-		if(forward) {
-			if(position > limitIndex) {
-				finish();
-			} else {
-				getLogLines(position, position + (SEARCH_FRAME_SIZE * direction))
-					.then(analyze)
-					.then(function() {
-						position += SEARCH_FRAME_SIZE * direction;
-						bytesProcessed += SEARCH_FRAME_SIZE;
-						progressBar.value = bytesProcessed;
-						cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + lineCount + " entries";
-						resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
-						timeSpentParsing += new Date() - fileReadEndTime;
-						readNext();
-					})
-					.fail(function(e) {
-						console.error(e);
-					});
+
+
+	var onWorkerEvent = function onWorkerEvent(event) {
+		var msg = event.data;
+		var index = msg.workerIndex;
+
+		workers[index].busy = false;
+
+		msg.keys.forEach(function(key) {
+			matches[key] = msg.matches[key];
+			keys.push(key);
+		});
+
+		progressBar.value = bytesProcessed;
+		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + lineCount + " entries";
+		resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
+		timeSpentParsing += new Date() - fileReadEndTime;
+
+		var workersWorking = false;
+		workers.forEach(function(worker) {
+			if(worker.busy) {
+				workersWorking = true;
 			}
+		});
+
+		if(position < limitIndex) {
+			delegateWork();
+		} else if(!workersWorking) {
+			finish();
+		}
+
+	};
+
+	var getAvailableWorker = function getAvailableWorker() {
+		var ret = null;
+		workers.forEach(function(worker) {
+			if(!worker.busy) {
+				ret = worker;
+			}
+		});
+		return ret;
+	};
+
+	var readNext = function(worker) {
+		worker.busy = true;
+		worker.worker.onmessage = onWorkerEvent;
+		worker.worker.postMessage({
+			action: 'do',
+			startIndex: position,
+			endIndex: position + (SEARCH_FRAME_SIZE * direction),
+			query: query,
+			file: filePicker.files[0]
+		});
+		position += SEARCH_FRAME_SIZE * direction;
+		bytesProcessed += SEARCH_FRAME_SIZE;
+	};
+
+	var delegateWork = function delegateWork() {
+		var worker = getAvailableWorker();
+		while(worker !== null) {
+			readNext(worker);
+			worker = getAvailableWorker();
 		}
 	};
 
 	var finish = function() {
 		deferred.resolve({
-			results: stringResults,
 			timeTakenMs: new Date() - searchStartedAt,
 			entriesSearched: lineCount,
 			bytesSearched: Math.abs(startIndex - limitIndex),
-			matchesDictionary: matchesDictionary,
+			matchesDictionary: matches,
 			timeSpentParsing: timeSpentParsing,
 			keys: keys
 		});
 	};
 
-	var appendResult = function(logLine) {
-		matchesDictionary[logLine.logId2].push(logLine);
-	};
-
-	var analyze = function analyze(lines) {
-		lineCount += lines.length;
-
-		lines.forEach(function(line) {
-			line = '[20' + line; //Fix split
-			var parsedLine = new LogLine(line);
-			var hasEntry = (matchesDictionary[parsedLine.logId2]);
-
-			if (hasEntry) {
-				appendResult(parsedLine);
-			} else if(line.indexOf(query) > -1) {
-				sizeOfMatchedData += line.length;
-				resultCount++;
-
-				if(parsedLine.logId2) {
-					if(!hasEntry) {
-						keys.push(parsedLine.logId2);
-						matchesDictionary[parsedLine.logId2] = [];
-					}
-					appendResult(parsedLine);
-				}
-				return true;
-			}
-		});
-	};
-
 	this.search = function search() {
-		readNext();
+
+
+		delegateWork();
+
 		return deferred.promise;
-	}
-};
-
-var LogLine = function LogLine(line) {
-
-	/*
-	 Example:
-	 [2014-10-22 19:35:21,577] [SDI_VS_ANDROID  ] [                              ] [jILCT7CkUWHlr82yX9lI0g## ] INFO  |com.sdi.xbn.web.spring.SDAPILoggingFilter| ...restofmessage...
-
-	 Matching groups:
-	 (0: Whole string)
-	 1.	`2014-10-22 19:35:21,577`
-	 2.	`SDI_VS_ANDROID  `
-	 3.	`                              `
-	 4.	`jILCT7CkUWHlr82yX9lI0g## `
-	 5.	`INFO`
-	 6.	`com.sdi.xbn.web.spring.SDAPILoggingFilter`
-	 7.	`ENTRY GET ...restofmessage...`
-	 */
-	this.line = line;
-	var fields = line.match(capturingMultiLineLogMatcher);
-	if(fields) {
-		this.time = fields[1];
-		this.appId = fields[2];
-		this.logId1 = fields[3];
-		this.logId2 = fields[4];
-		this.level = fields[5];
-		this.className = fields[6];
-		this.message = fields[7];
-	} else {
-		this.error = true;
 	}
 };
 
