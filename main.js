@@ -57,7 +57,7 @@ function getFileSize() {
 var Search = function(startIndex, limitIndex, forward) {
 	var position = startIndex;
 	var deferred = Q.defer();
-	var SEARCH_FRAME_SIZE = 64 * 1024 * 1024; //50MB
+	var SEARCH_FRAME_SIZE = 64 * 1024 * 1024;
 	var query = document.querySelector('#pattern').value;
 	var direction = forward ? 1 : -1;
 	var searchStartedAt = new Date();
@@ -89,17 +89,22 @@ var Search = function(startIndex, limitIndex, forward) {
 			keys.push(key);
 		});
 
-		progressBar.value = bytesProcessed;
-		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + lineCount + " entries";
-		resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
-		timeSpentParsing += new Date() - fileReadEndTime;
-
+		var workerString = "";
 		var workersWorking = false;
 		workers.forEach(function(worker) {
 			if(worker.busy) {
+				workerString += "A,";
 				workersWorking = true;
+			} else {
+				workerString += "-,";
 			}
 		});
+
+		progressBar.value = bytesProcessed;
+		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + lineCount + " entries [" + workerString + "]";
+		resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
+		timeSpentParsing += new Date() - fileReadEndTime;
+
 
 		if(!workersWorking && position > limitIndex) {
 			finish();
