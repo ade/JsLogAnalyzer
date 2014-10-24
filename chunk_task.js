@@ -208,6 +208,7 @@ var ChunkTask = function ChunkTask() {
 
 		getLogLines(startIndex, endIndex, file)
 			.then(function(fileContents) {
+				postMessage("parsePhase");
 				return analyze(fileContents, query);
 			})
 			.then(function(results) {

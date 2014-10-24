@@ -1,4 +1,3 @@
-
 var searchButton = document.querySelector('#searchbutton');
 var cursorPositionLabel = document.querySelector('#cursor_position');
 var resultCountLabel = document.querySelector('#result_count');
@@ -58,7 +57,7 @@ function getFileSize() {
 var Search = function(startIndex, limitIndex, forward) {
 	var position = startIndex;
 	var deferred = Q.defer();
-	var SEARCH_FRAME_SIZE = 32 * 1024 * 1024; //50MB
+	var SEARCH_FRAME_SIZE = 64 * 1024 * 1024; //50MB
 	var query = document.querySelector('#pattern').value;
 	var direction = forward ? 1 : -1;
 	var searchStartedAt = new Date();
@@ -73,6 +72,13 @@ var Search = function(startIndex, limitIndex, forward) {
 
 
 	var onWorkerEvent = function onWorkerEvent(event) {
+		if(event.data === 'parsePhase') {
+			if(position < limitIndex) {
+				delegateWork();
+			}
+			return;
+		}
+
 		var msg = event.data;
 		var index = msg.workerIndex;
 
@@ -95,9 +101,7 @@ var Search = function(startIndex, limitIndex, forward) {
 			}
 		});
 
-		if(position < limitIndex) {
-			delegateWork();
-		} else if(!workersWorking) {
+		if(!workersWorking && position > limitIndex) {
 			finish();
 		}
 
@@ -129,10 +133,7 @@ var Search = function(startIndex, limitIndex, forward) {
 
 	var delegateWork = function delegateWork() {
 		var worker = getAvailableWorker();
-		while(worker !== null) {
-			readNext(worker);
-			worker = getAvailableWorker();
-		}
+		readNext(worker);
 	};
 
 	var finish = function() {
