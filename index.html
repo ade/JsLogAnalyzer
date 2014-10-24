@@ -1,0 +1,78 @@
+<html>
+<head>
+	<script src="q.js"></script>
+	<script src="handlebars-v2.0.0.js"></script>
+
+</head>
+
+<style>
+	#byte_content {
+		margin: 5px 0;
+		max-height: 100px;
+		overflow-y: auto;
+		overflow-x: hidden;
+	}
+	#byte_range { margin-top: 5px; }
+
+	#pattern {
+		width: 100%;
+
+	}
+
+	.data {
+		font-family: Courier New, Courier, Lucida Console, sans-serif;
+	}
+</style>
+<div>
+	<input type="file" id="files" name="file" />
+</div>
+<div>
+	<input type="range" id="read-from" min="0" style="width:500px" disabled /> <label for="read-from" id="read-from-label"></label>
+</div>
+<div>
+	<input type="range" id="read-to" min="1" style="width:500px" disabled /> <label for="read-to" id="read-to-label"></label>
+</div>
+
+<button id="searchbutton">Search</button>
+<div id="byte_range"></div>
+<div id="byte_content"></div>
+<div>
+	Cursor position: <span id="cursor_position"></span>
+</div>
+<div>
+	<progress id="progress-bar" max="100" value="0" style="width:500px"></progress>
+</div>
+<div>
+	Results: <span id="result_count"></span>
+</div>
+<div>
+	Request pattern trigger:
+	<input type="text" class="data" id="pattern" value="https://e-api01.securitas-direct.com/xbn/2/installation/search?email=  host"/>
+</div>
+<div id="fancy_output"></div>
+
+<script id="line-template" type="text/x-handlebars-template">
+	<div class="result-line">
+		<div class="log-header">
+			<span class="log-level">{{level}}</span>
+			at <span class="log-datetime">{{time}}</span>
+			from <span class="log-appid">{{appId}}</span>
+			reported by <span class="log-class">{{className}}</span>
+		</div>
+		<div class="log-main">
+			<span class="log-message">{{message}}</span>
+		</div>
+		<div class="log-footer">
+			ID1: <span class="log-id1">{{logId1}}</span>
+			ID2: <span class="log-id2">{{logId2}}</span>
+		</div>
+	</div>
+
+</script>
+
+
+
+<script src="main.js"></script>
+
+
+</html>
