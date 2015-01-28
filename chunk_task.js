@@ -166,10 +166,25 @@ var ChunkTask = function ChunkTask() {
 		var matchesDictionary = [];
 		var keys = [];
 		var bytesRead = 0;
+        var linesSinceFlush = 0;
+        
+        var queryRegex = new RegExp(query);
 
 		var appendResult = function(logLine) {
 			matchesDictionary[logLine.logId2].push(logLine);
 		};
+        
+        var flush = function flush() {
+            postMessage({
+                msg: 'resultCount',
+                results: resultCount,
+                bytesRead: bytesRead
+            });
+            
+            bytesRead = 0;
+            resultCount = 0;
+            linesSinceFlush = 0;
+        };
 
 		lines.forEach(function(line) {
 
@@ -181,9 +196,14 @@ var ChunkTask = function ChunkTask() {
 
 			if (hasEntry) {
 				appendResult(parsedLine);
-			} else if(line.indexOf(query) > -1) {
+			} else if(line.match(queryRegex)) {
 				sizeOfMatchedData += line.length;
 				resultCount++;
+                
+                if(linesSinceFlush > 100000) {
+                    flush();    
+                }
+                
 
 				if(parsedLine.logId2) {
 					if(!hasEntry) {
@@ -194,6 +214,8 @@ var ChunkTask = function ChunkTask() {
 				}
 			}
 		});
+        
+        flush();
 
 		return {
 			matches: matchesDictionary,
@@ -212,7 +234,11 @@ var ChunkTask = function ChunkTask() {
 				return analyze(fileContents, query);
 			})
 			.then(function(results) {
-				postMessage(results);
+				postMessage({
+                    msg: 'done',
+                    results: results,
+                    workerIndex: workerIndex
+                });
 			})
 			.fail(function(e) {
 				console.error(e);

@@ -14,7 +14,7 @@
 	}
 	#byte_range { margin-top: 5px; }
 
-	#pattern {
+	#pattern, #plaintext {
 		width: 100%;
 
 	}
@@ -22,6 +22,12 @@
 	.data {
 		font-family: Courier New, Courier, Lucida Console, sans-serif;
 	}
+    
+    .codeInput {
+        font-family: Courier New, Courier, Lucida Console, sans-serif;
+        width:100%;
+        height:100%;
+    }
 </style>
 <div>
 	<input type="file" id="files" name="file" />
@@ -46,8 +52,53 @@
 	Results: <span id="result_count"></span>
 </div>
 <div>
-	Request pattern trigger:
-	<input type="text" class="data" id="pattern" value="https://e-api01.securitas-direct.com/xbn/2/installation/search?email=  host"/>
+	Plaintext pattern:<br/>
+	<input type="text" class="data" id="plaintext" value="https://e-api01.verisure.com/xbn/2/installation/123"/>
+</div>
+<button id="plainTextToRegExp">Create regular expression</button>
+<div>
+	Regular expression pattern:<br/>
+	<input type="text" class="data" id="pattern" value="https:\/\/e\-api01\.verisure\.com\/xbn\/2\/installation\/[0-9]+\/overview.*agent:Apache-HttpClient.*VS_APP_ANDROID"/>
+</div>
+<div>
+    <input type="checkbox" id="render-results" />
+    Render results
+</div>
+<div>
+    Parsing script<br/>
+    <textarea id="parse-script" class="codeInput" spellcheck="false">
+(function parseScript() {
+this.readLine = function (line) {
+    /*
+    1.	`2014-10-22 19:35:21,577`
+    2.	`SDI_VS_ANDROID  `
+    3.	`                              `
+    4.	`jILCT7CkUWHlr82yX9lI0g## `
+    5.	`INFO`
+    6.	`com.sdi.xbn.web.spring.SDAPILoggingFilter`
+    7.	`ENTRY GET ...restofmessage...`
+
+    line.time = fields[1];
+    line.appId = fields[2];
+    line.logId1 = fields[3];
+    line.logId2 = fields[4];
+    line.level = fields[5];
+    line.className = fields[6];
+    line.message = fields[7];
+    */
+
+}
+
+this.getOutput = function() {
+    return "my conclusion";
+}
+        
+return this;
+        
+})();
+        
+    </textarea>
+    
 </div>
 <div id="fancy_output"></div>
 

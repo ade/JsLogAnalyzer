@@ -5,6 +5,16 @@ var readFrom = document.querySelector("#read-from");
 var readTo = document.querySelector("#read-to");
 var filePicker = document.querySelector("#files");
 var progressBar = document.querySelector("#progress-bar");
+var renderResultsCheckbox = document.querySelector("#render-results");
+var outputbox = document.querySelector("#fancy_output");
+var plainTextBox = document.querySelector("#plaintext");
+var plainTextButton = document.querySelector("#plainTextToRegExp");
+var regExpInput = document.querySelector('#pattern');
+var scriptInput = document.querySelector("#parse-script");
+
+var RESULT_CACHE_LIMIT = 10000; //Soft limit. Hard limit seems to be around 20 000 before chrome crashes
+var RESULT_RENDER_LIMIT = 50;
+
 var fileSize;
 var fileReadEndTime;
 
@@ -58,7 +68,7 @@ var Search = function(startIndex, limitIndex, forward) {
 	var position = startIndex;
 	var deferred = Q.defer();
 	var SEARCH_FRAME_SIZE = 64 * 1024 * 1024;
-	var query = document.querySelector('#pattern').value;
+    var query = regExpInput.value;
 	var direction = forward ? 1 : -1;
 	var searchStartedAt = new Date();
 	var sizeOfMatchedData = 0;
@@ -68,25 +78,53 @@ var Search = function(startIndex, limitIndex, forward) {
 	var lineCount = 0;
 	var bytesProcessed = 0;
 	var timeSpentParsing = 0;
-
+    var parseScript = eval(scriptInput.value);
 
 
 	var onWorkerEvent = function onWorkerEvent(event) {
-		if(event.data === 'parsePhase') {
-			if(position < limitIndex) {
-				delegateWork();
-			}
-			return;
-		}
+        if (event.data === 'parsePhase') {
+            if (position < limitIndex && getAvailableWorker() !== null) {
+                delegateWork();
+            }
+            return;
+        }
 
-		var msg = event.data;
-		var index = msg.workerIndex;
+        if (event.data && event.data.msg) {
+            switch (event.data.msg) {
+                case 'resultCount':
+                    resultCount += event.data.results;
+                    bytesProcessed += event.data.bytesRead;
+                    break;
+                case 'done':
+                    onWorkerDone(event);
+                    break;
+                default:
+                    debugger;
+            }
+        }
+    };
+    
+    var onWorkerDone = function onWorkerDone(event) {
+		var msg = event.data.results;
+		var index = event.data.workerIndex;
 
 		workers[index].busy = false;
 
 		msg.keys.forEach(function(key) {
-			matches[key] = msg.matches[key];
-			keys.push(key);
+            
+            msg.matches[key].forEach(function(match) {
+                parseScript.readLine(match);
+            });
+
+            
+            if(resultCount < RESULT_CACHE_LIMIT) {
+                if (matches[key]) {
+                    matches[key].push(msg.matches[key]);
+                } else {
+                    matches[key] = msg.matches[key];
+                }
+                keys.push(key);
+            }
 		});
 
 		var workerString = "";
@@ -106,9 +144,13 @@ var Search = function(startIndex, limitIndex, forward) {
 		timeSpentParsing += new Date() - fileReadEndTime;
 
 
+        if(position <= limitIndex) {
+            delegateWork();
+        }
+        
 		if(!workersWorking && position > limitIndex) {
-			finish();
-		}
+			finish();  
+        }
 
 	};
 
@@ -123,6 +165,7 @@ var Search = function(startIndex, limitIndex, forward) {
 	};
 
 	var readNext = function(worker) {
+        if(worker === null) debugger;
 		worker.busy = true;
 		worker.worker.onmessage = onWorkerEvent;
 		worker.worker.postMessage({
@@ -133,7 +176,7 @@ var Search = function(startIndex, limitIndex, forward) {
 			file: filePicker.files[0]
 		});
 		position += SEARCH_FRAME_SIZE * direction;
-		bytesProcessed += SEARCH_FRAME_SIZE;
+		//bytesProcessed += SEARCH_FRAME_SIZE;
 	};
 
 	var delegateWork = function delegateWork() {
@@ -169,21 +212,23 @@ var bytesToSize = function bytesToSize(bytes) {
 };
 
 var presentResults = function presentResults(results) {
-	var outputbox = document.querySelector("#fancy_output");
 	var matches = results.matchesDictionary;
 	var fragment = document.createDocumentFragment();
 	var source   = document.querySelector("#line-template").innerHTML;
 	var template = Handlebars.compile(source);
-
+    var drawCount = 0;
+    
 	results.keys.forEach(function(key) {
-		var result = matches[key];
-		var container = document.createElement("div");
-		container.style.background = randomColorString();
-		fragment.appendChild(container);
+        if(drawCount < RESULT_RENDER_LIMIT) {
+            var result = matches[key];
+            var container = document.createElement("div");
+            container.style.background = randomColorString();
+            fragment.appendChild(container);
 
-		result.forEach(function(lineObject) {
-			container.innerHTML += template(lineObject);
-		});
+            result.forEach(function (lineObject) {
+                container.innerHTML += template(lineObject);
+            });
+        }
 	});
 	outputbox.innerHTML = '';
 	outputbox.appendChild(fragment);
@@ -199,7 +244,20 @@ function randomColorString () {
 	return '#' + r + g + b;
 }
 
+plainTextButton.addEventListener('click', function() {
+    var escaped = escapeRegExp(plainTextBox.value);
+    regExpInput.value = escaped;
+});
+
 searchButton.addEventListener('click', function() {
+    try {
+        var queryRegex = new RegExp(regExpInput.value);
+    } catch (e) {
+        alert("invalid regexp!");
+        return;
+    }
+    
+    
 	searchButton.textContent = 'Searching...';
 	searchButton.disabled = true;
 	var start = parseInt(readFrom.value, 10);
@@ -211,6 +269,8 @@ searchButton.addEventListener('click', function() {
 	end = Math.min(fileSize, end);
 
 	progressBar.max = end - start;
+    
+    outputbox.innerHTML = '';
 
 	var searcher = new Search(start, end, true);
 
@@ -224,11 +284,20 @@ searchButton.addEventListener('click', function() {
 			searchButton.textContent = 'Search';
 			searchButton.disabled = false;
 
-			presentResults(e);
+            if(renderResultsCheckbox.checked) {
+                presentResults(e);
+            }
 		})
 		.fail(function() {
 			cursorPositionLabel.textContent = "Failed";
 			searchButton.textContent = 'Search';
 			searchButton.disabled = false;
-		});
+		})
+        .finally(function() {
+            stopThreads();
+        });
 }, false);
+
+function escapeRegExp(str) {
+    return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&");
+}
