@@ -167,6 +167,8 @@ var ChunkTask = function ChunkTask() {
 		var keys = [];
 		var bytesRead = 0;
         var linesSinceFlush = 0;
+		var linesReadTotal = 0;
+		var analyzeStartTime = new Date();
         
         var queryRegex = new RegExp(query);
 
@@ -183,6 +185,7 @@ var ChunkTask = function ChunkTask() {
             
             bytesRead = 0;
             resultCount = 0;
+			linesReadTotal+= linesSinceFlush;
             linesSinceFlush = 0;
         };
 
@@ -190,6 +193,8 @@ var ChunkTask = function ChunkTask() {
 
 			line = '[20' + line; //Fix split
 			bytesRead += line.length;
+
+			linesSinceFlush++;
 
 			var parsedLine = new LogLine(line);
 			var hasEntry = (matchesDictionary[parsedLine.logId2]);
@@ -222,6 +227,8 @@ var ChunkTask = function ChunkTask() {
 			keys: keys,
 			bytesRead: bytesRead,
 			sizeOfMatchedData: sizeOfMatchedData,
+			linesTotalAnalyzed: linesReadTotal,
+			timeSpentParsing: new Date() - analyzeStartTime,
 			workerIndex: workerIndex
 		};
 	};

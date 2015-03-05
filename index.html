@@ -1,8 +1,9 @@
 <html>
 <head>
+	<title>BULA</title>
 	<script src="q.js"></script>
 	<script src="handlebars-v2.0.0.js"></script>
-
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.1.8/ace.js" type="text/javascript" charset="utf-8"></script>
 </head>
 
 <style>
@@ -28,79 +29,163 @@
         width:100%;
         height:100%;
     }
+
+	#ace-editor {
+		height: 500px;
+	}
+
+	.hide {
+		display:none;
+	}
+
+	.panel {
+		border: 1px solid #808080;
+		background-color: #EEEEEE;
+		border-radius: 5px;
+		padding: 10px;
+		margin: 5px;
+	}
+
+	body {
+		font-family: Courier New, Courier, Lucida Console, sans-serif;
+	}
+
+	.errorText {
+		color: #FF0000;
+	}
 </style>
-<div>
-	<input type="file" id="files" name="file" />
-</div>
-<div>
-	<input type="range" id="read-from" min="0" style="width:500px" disabled /> <label for="read-from" id="read-from-label"></label>
-</div>
-<div>
-	<input type="range" id="read-to" min="1" style="width:500px" disabled /> <label for="read-to" id="read-to-label"></label>
+
+<div class="panel">
+	<div>
+		<b>Select a log file (unzipped): </b> <input type="file" id="files" name="file" />
+	</div>
+	Data range
+	<div>
+		<input type="range" id="read-from" min="0" style="width:500px" disabled /> <label for="read-from" id="read-from-label"></label>
+	</div>
+	<div>
+		<input type="range" id="read-to" min="1" style="width:500px" disabled /> <label for="read-to" id="read-to-label"></label>
+	</div>
 </div>
 
-<button id="searchbutton">Search</button>
+
 <div id="byte_range"></div>
 <div id="byte_content"></div>
-<div>
-	Cursor position: <span id="cursor_position"></span>
+
+
+<div class="panel">
+	<div>
+		Plaintext pattern:<br/>
+		<input type="text" class="data" id="plaintext" value="https://e-api01.verisure.com/xbn/2/installation/123"/>
+	</div>
+	<button id="plainTextToRegExp">Create a regular expression to find plaintext above</button>
+	<div>
+		Regular expression pattern:<br/>
+		<input type="text" class="data" id="pattern" value="https:\/\/e\-api01\.verisure\.com\/xbn\/2\/installation\/[0-9]+\/overview.*agent:Apache-HttpClient.*VS_APP_ANDROID"/>
+	</div>
 </div>
-<div>
-	<progress id="progress-bar" max="100" value="0" style="width:500px"></progress>
+
+<div class="panel">
+	<div>
+		<input type="checkbox" id="render-results" />
+		Render results (a maximum of 50 will be rendered)
+	</div>
+	<div>
+		<input type="checkbox" id="option-use-script"/>
+		Use script to parse
+	</div>
 </div>
-<div>
-	Results: <span id="result_count"></span>
+
+<div class="panel">
+	<button id="searchbutton">Search</button>
+
+	<div>
+		<progress id="progress-bar" max="100" value="0" style="width:500px"></progress>
+		<br>
+		<br/>
+	</div>
+
+	<div>
+		Status: <span id="cursor_position"></span>
+	</div>
+	<div>
+		Results: <span id="result_count"></span>
+	</div>
 </div>
-<div>
-	Plaintext pattern:<br/>
-	<input type="text" class="data" id="plaintext" value="https://e-api01.verisure.com/xbn/2/installation/123"/>
-</div>
-<button id="plainTextToRegExp">Create regular expression</button>
-<div>
-	Regular expression pattern:<br/>
-	<input type="text" class="data" id="pattern" value="https:\/\/e\-api01\.verisure\.com\/xbn\/2\/installation\/[0-9]+\/overview.*agent:Apache-HttpClient.*VS_APP_ANDROID"/>
-</div>
-<div>
-    <input type="checkbox" id="render-results" />
-    Render results
-</div>
-<div>
-    Parsing script<br/>
-    <textarea id="parse-script" class="codeInput" spellcheck="false">
+
+<div id="ace-editor-container" class="hide">
+	<div id="ace-editor-error-flag" class="panel errorText hide">
+		&#9888; Error in parse script.
+	</div>
+	<div id="ace-editor">
 (function parseScript() {
-this.readLine = function (line) {
-    /*
-    1.	`2014-10-22 19:35:21,577`
-    2.	`SDI_VS_ANDROID  `
-    3.	`                              `
-    4.	`jILCT7CkUWHlr82yX9lI0g## `
-    5.	`INFO`
-    6.	`com.sdi.xbn.web.spring.SDAPILoggingFilter`
-    7.	`ENTRY GET ...restofmessage...`
 
-    line.time = fields[1];
-    line.appId = fields[2];
-    line.logId1 = fields[3];
-    line.logId2 = fields[4];
-    line.level = fields[5];
-    line.className = fields[6];
-    line.message = fields[7];
-    */
+	/* Uncomment to keep script data between executions.
+	window.scriptKeptData = window.scriptKeptData || {};
+	*/
 
-}
+	var appData = window.scriptKeptData || {};
+	appData.uniqueUserMap = appData.uniqueUserMap || [];
+	appData.uniqueUsers = appData.uniqueUsers || 0;
 
-this.getOutput = function() {
-    return "my conclusion";
-}
-        
-return this;
-        
+	/** This function will be executed one time for each log entry that matches the regular expression above
+	* Note that match is an array of several objects. Each object has the following properties:
+	*
+	* line.time = fields[1];
+	* line.appId = fields[2];
+	* line.logId1 = fields[3];
+	* line.logId2 = fields[4];
+	* line.level = fields[5];
+	* line.className = fields[6];
+	* line.message = fields[7];
+	*
+	* Example data:
+	* 1.	`2014-10-22 19:35:21,577`
+	* 2.	`SDI_VS_ANDROID  `
+	* 3.	`                              `
+	* 4.	`jILCT7CkUWHlr82yX9lI0g## `
+	* 5.	`INFO`
+	* 6.	`com.sdi.xbn.web.spring.SDAPILoggingFilter`
+	* 7.	`..example message...`
+	*/
+	this.readMatch = function (match) {
+		countUniqueUsers(match);
+	};
+
+	/** Counts unique users in log file, if called on each match. */
+	function countUniqueUsers(match) {
+		match.forEach(function(line) {
+			var email = line.message.match(/user:CPE\/([^@]*@[^,]*),/);
+			if(email !== null) {
+				if(appData.uniqueUserMap[email[0]] !== true) {
+					appData.uniqueUserMap[email[0]] = true;
+					appData.uniqueUsers++;
+				}
+			}
+		});
+	}
+
+	/** The value returned here will be assigned as innerHTML in the div below ("Script results") */
+	this.getOutput = function() {
+		return appData.uniqueUsers;
+	};
+
+	return this;
+
 })();
-        
-    </textarea>
-    
 </div>
-<div id="fancy_output"></div>
+</div>
+<div>
+	<h2>Script results</h2>
+	<div id="script-output"></div>
+</div>
+<hr>
+<div>
+	<h2>Matching results</h2>
+	<div id="fancy_output"></div>
+</div>
+<br/>
+<br/>
 
 <script id="line-template" type="text/x-handlebars-template">
 	<div class="result-line">

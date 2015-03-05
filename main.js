@@ -10,13 +10,18 @@ var outputbox = document.querySelector("#fancy_output");
 var plainTextBox = document.querySelector("#plaintext");
 var plainTextButton = document.querySelector("#plainTextToRegExp");
 var regExpInput = document.querySelector('#pattern');
-var scriptInput = document.querySelector("#parse-script");
+var jsEditorContainer = document.querySelector("#ace-editor-container");
+var optionUseScript = document.querySelector("#option-use-script");
+var autoSaveTimer = false;
+var jsEditorErrorFlag = document.querySelector("#ace-editor-error-flag");
 
 var RESULT_CACHE_LIMIT = 10000; //Soft limit. Hard limit seems to be around 20 000 before chrome crashes
 var RESULT_RENDER_LIMIT = 50;
 
 var fileSize;
 var fileReadEndTime;
+
+var jsEditor;
 
 var workerCount = 4;
 var workers = [];
@@ -40,6 +45,8 @@ var setSliderLabels = function setSliderValues() {
 readFrom.addEventListener('change', setSliderLabels);
 readTo.addEventListener('change', setSliderLabels);
 
+optionUseScript.addEventListener('change', onToggleUseScript);
+
 filePicker.addEventListener('change', function() {
 	fileSize = getFileSize();
 	readFrom.disabled = false;
@@ -54,6 +61,34 @@ filePicker.addEventListener('change', function() {
 
 	setSliderLabels();
 });
+
+var jsEditor = ace.edit("ace-editor");
+jsEditor.setTheme("ace/theme/clouds");
+jsEditor.getSession().setMode("ace/mode/javascript");
+
+jsEditor.getSession().on('change', function() {
+	clearTimeout(autoSaveTimer);
+	autoSaveTimer = setTimeout(saveScript, 2000);
+});
+
+var savedScript = localStorage.getItem("savedParsingScript");
+if(savedScript !== null) {
+	jsEditor.setValue(savedScript);
+	jsEditor.selection.selectFileStart();
+}
+
+function saveScript() {
+	localStorage.setItem("savedParsingScript", jsEditor.getValue());
+	console.log("Saved");
+}
+
+function onToggleUseScript(e) {
+	if(optionUseScript.checked) {
+		jsEditorContainer.classList.remove('hide');
+	} else {
+		jsEditorContainer.classList.add('hide');
+	}
+}
 
 function getFileSize() {
 	var files = document.getElementById('files').files;
@@ -75,11 +110,22 @@ var Search = function(startIndex, limitIndex, forward) {
 	var resultCount = 0;
 	var matches = [];
 	var keys = [];
-	var lineCount = 0;
 	var bytesProcessed = 0;
 	var timeSpentParsing = 0;
-    var parseScript = eval(scriptInput.value);
+    var parseScript;
+	var errorInParseScript = false;
+	var linesTotalAnalyzed = 0;
 
+	if(optionUseScript.checked) {
+		try {
+			parseScript = eval(jsEditor.getValue());
+			jsEditorErrorFlag.classList.add("hide");
+		} catch (e) {
+			parseScript = null;
+			console.log(e);
+			jsEditorErrorFlag.classList.remove("hide");
+		}
+	}
 
 	var onWorkerEvent = function onWorkerEvent(event) {
         if (event.data === 'parsePhase') {
@@ -107,14 +153,28 @@ var Search = function(startIndex, limitIndex, forward) {
     var onWorkerDone = function onWorkerDone(event) {
 		var msg = event.data.results;
 		var index = event.data.workerIndex;
+		linesTotalAnalyzed += msg.linesTotalAnalyzed;
+		timeSpentParsing += msg.timeSpentParsing;
 
 		workers[index].busy = false;
 
 		msg.keys.forEach(function(key) {
-            
+
+			/*
             msg.matches[key].forEach(function(match) {
                 parseScript.readLine(match);
             });
+            */
+			if(optionUseScript.checked && !errorInParseScript) {
+				try {
+					parseScript.readMatch(msg.matches[key]);
+				}
+				catch (e) {
+					errorInParseScript = e;
+					console.log(e);
+					jsEditorErrorFlag.classList.remove("hide");
+				}
+			}
 
             
             if(resultCount < RESULT_CACHE_LIMIT) {
@@ -139,9 +199,8 @@ var Search = function(startIndex, limitIndex, forward) {
 		});
 
 		progressBar.value = bytesProcessed;
-		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + lineCount + " entries [" + workerString + "]";
+		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + linesTotalAnalyzed + " entries [" + workerString + "]";
 		resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
-		timeSpentParsing += new Date() - fileReadEndTime;
 
 
         if(position <= limitIndex) {
@@ -185,13 +244,21 @@ var Search = function(startIndex, limitIndex, forward) {
 	};
 
 	var finish = function() {
+		var scriptOutput = "(error occured)"
+		try {
+			scriptOutput = parseScript.getOutput();
+		} catch(e) {
+			console.log(e);
+		}
+
 		deferred.resolve({
 			timeTakenMs: new Date() - searchStartedAt,
-			entriesSearched: lineCount,
+			entriesSearched: linesTotalAnalyzed,
 			bytesSearched: Math.abs(startIndex - limitIndex),
 			matchesDictionary: matches,
 			timeSpentParsing: timeSpentParsing,
-			keys: keys
+			keys: keys,
+			scriptResult: scriptOutput
 		});
 	};
 
@@ -223,11 +290,12 @@ var presentResults = function presentResults(results) {
             var result = matches[key];
             var container = document.createElement("div");
             container.style.background = randomColorString();
-            fragment.appendChild(container);
 
             result.forEach(function (lineObject) {
                 container.innerHTML += template(lineObject);
             });
+
+			fragment.appendChild(container);
         }
 	});
 	outputbox.innerHTML = '';
@@ -287,6 +355,8 @@ searchButton.addEventListener('click', function() {
             if(renderResultsCheckbox.checked) {
                 presentResults(e);
             }
+
+			document.getElementById("script-output").innerHTML = e.scriptResult;
 		})
 		.fail(function() {
 			cursorPositionLabel.textContent = "Failed";
