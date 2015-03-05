@@ -199,7 +199,7 @@ var Search = function(startIndex, limitIndex, forward) {
 		});
 
 		progressBar.value = bytesProcessed;
-		cursorPositionLabel.textContent = bytesToSize(position) + ", parsed " + linesTotalAnalyzed + " entries [" + workerString + "]";
+		cursorPositionLabel.textContent = 'Searched ' + bytesToSize(position) + ", parsed " + bigNumberFormat(linesTotalAnalyzed) + " entries [" + workerString + "]";
 		resultCountLabel.textContent = resultCount + " (" + bytesToSize(sizeOfMatchedData) + ")";
 
 
@@ -244,11 +244,18 @@ var Search = function(startIndex, limitIndex, forward) {
 	};
 
 	var finish = function() {
-		var scriptOutput = "(error occured)"
-		try {
-			scriptOutput = parseScript.getOutput();
-		} catch(e) {
-			console.log(e);
+		var scriptOutput;
+		if(optionUseScript.checked && !errorInParseScript) {
+			try {
+				scriptOutput = "(error occured)"
+				scriptOutput = parseScript.getOutput();
+			} catch (e) {
+				console.log(e);
+			}
+		} else if(errorInParseScript) {
+			scriptOutput = "(error occured)";
+		} else {
+			scriptOutput = "(inactive)"
 		}
 
 		deferred.resolve({
@@ -277,6 +284,19 @@ var bytesToSize = function bytesToSize(bytes) {
 	var i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
 	return Math.round((bytes / Math.pow(1024, i) * 100)) / 100 + ' ' + sizes[i];
 };
+
+function bigNumberFormat(num) {
+	if (num >= 1000000000) {
+		return (num / 1000000000).toFixed(1).replace(/\.0$/, '') + ' billion';
+	}
+	if (num >= 1000000) {
+		return (num / 1000000).toFixed(1).replace(/\.0$/, '') + ' million';
+	}
+	if (num >= 1000) {
+		return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+	}
+	return num;
+}
 
 var presentResults = function presentResults(results) {
 	var matches = results.matchesDictionary;
@@ -347,7 +367,7 @@ searchButton.addEventListener('click', function() {
 			var entrySpeed = Math.round((e.entriesSearched / (e.timeTakenMs / 1000)) / 1000);
 
 			var byteSpeed = bytesToSize(e.bytesSearched / (e.timeTakenMs / 1000));
-			cursorPositionLabel.textContent = e.entriesSearched + " entries searched in " + Math.round(e.timeTakenMs/1000) + " sec (" + entrySpeed + "k entries/sec, " + byteSpeed + "/sec), time spent parsing: " + e.timeSpentParsing;
+			cursorPositionLabel.textContent = bigNumberFormat(e.entriesSearched) + " entries searched in " + Math.round(e.timeTakenMs/1000) + " sec (" + entrySpeed + "k entries/sec, " + byteSpeed + "/sec), time spent parsing: " + e.timeSpentParsing;
 
 			searchButton.textContent = 'Search';
 			searchButton.disabled = false;
